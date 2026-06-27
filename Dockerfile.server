@@ -1,0 +1,45 @@
+# Stage 1: Build
+FROM node:22-alpine AS builder
+
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate
+
+WORKDIR /app
+
+# Copy workspace config and lockfile
+COPY .npmrc pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json package.json ./
+COPY packages/shared/package.json packages/shared/tsconfig.json ./packages/shared/
+COPY packages/server/package.json packages/server/tsconfig.json packages/server/build.mjs ./packages/server/
+
+RUN pnpm install --frozen-lockfile
+
+# Copy source and build shared first, then server
+COPY packages/shared/src ./packages/shared/src
+COPY packages/server/src ./packages/server/src
+
+RUN pnpm build:shared && pnpm build:server
+
+# Stage 2: Production runtime
+FROM node:22-alpine
+
+WORKDIR /app
+
+# Copy pnpm workspace skeleton
+COPY .npmrc pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/server/package.json ./packages/server/
+COPY packages/shared/package.json ./packages/shared/
+
+# Install production deps only
+RUN corepack enable && corepack prepare pnpm@11.7.0 --activate && \
+    pnpm install --frozen-lockfile --prod
+
+# Copy built bundles
+COPY --from=builder /app/packages/server/dist ./packages/server/dist
+COPY --from=builder /app/packages/shared/dist ./packages/shared/dist
+
+# Copy migration SQL files for production runtime migration
+COPY packages/server/drizzle ./packages/server/drizzle
+
+ENV NODE_ENV=production
+EXPOSE 3000
+
+CMD ["node", "packages/server/dist/index.js"]

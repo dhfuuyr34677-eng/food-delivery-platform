@@ -1,0 +1,18 @@
+{
+  "pages": [
+    "pages/orders/orders",
+    "pages/menu/menu",
+    "pages/dashboard/dashboard",
+    "pages/settlements/settlements",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#ff6b35",
+    "navigationBarTitleText": "商户端",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f5f5f5"
+  },
+  "usingComponents": {
+    "custom-tab-bar": "/custom-tab-bar/index"
+  }
+}

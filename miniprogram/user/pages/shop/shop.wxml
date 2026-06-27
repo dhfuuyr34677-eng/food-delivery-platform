@@ -1,0 +1,27 @@
+<view class="container" wx:if="{{shop}}">
+  <view class="shop-header">
+    <image class="shop-logo" src="{{shop.logo || '/images/default-shop.png'}}" mode="aspectFill" />
+    <view class="shop-name">{{shop.name}}</view>
+    <view class="shop-desc">{{shop.description}}</view>
+  </view>
+
+  <view class="section-title">商品列表</view>
+  <view class="product-list">
+    <view class="product-item" wx:for="{{shop.products}}" wx:key="id">
+      <view class="product-info">
+        <view class="product-name">{{item.name}}</view>
+        <view class="product-price">¥{{item.priceText}}</view>
+      </view>
+      <view class="product-actions">
+        <view class="btn-minus" bindtap="removeItem" data-id="{{item.id}}" wx:if="{{selectedItems[item.id]}}">-</view>
+        <view class="count" wx:if="{{selectedItems[item.id]}}">{{selectedItems[item.id]}}</view>
+        <view class="btn-plus" bindtap="addItem" data-id="{{item.id}}" data-name="{{item.name}}" data-price="{{item.price}}">+</view>
+      </view>
+    </view>
+  </view>
+</view>
+
+<view class="cart-bar" wx:if="{{totalCount}}">
+  <view class="cart-info">共{{totalCount}}件 ¥{{cartAmountText || '0.00'}}</view>
+  <view class="cart-btn" bindtap="goOrder">去下单</view>
+</view>

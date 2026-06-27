@@ -1,0 +1,14 @@
+<view class="container">
+  <view class="order-card" wx:for="{{orders}}" wx:key="id" bindtap="goDetail" data-id="{{item.id}}">
+    <view class="order-hd">
+      <view>订单号: {{item.orderNo}}</view>
+      <view class="status {{item.status}}">{{statusMap[item.status]}}</view>
+    </view>
+    <view class="order-body">
+      <view>金额: ¥{{item.amountText}}</view>
+      <view class="time">{{item.createdAt}}</view>
+    </view>
+  </view>
+  <view class="empty" wx:if="{{orders.length === 0}}">暂无订单</view>
+</view>
+<custom-tab-bar selected="1" />

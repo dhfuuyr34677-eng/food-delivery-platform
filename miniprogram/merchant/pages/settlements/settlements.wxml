@@ -1,0 +1,11 @@
+<view class="container">
+  <view class="settle-card" wx:for="{{settlements}}" wx:key="id">
+    <view class="amount">¥{{item.amountText}}</view>
+    <view class="detail">{{item.totalOrders}}笔订单 | 佣金¥{{item.commissionText}}</view>
+    <view class="status {{item.status}}">
+      {{item.statusText}}
+    </view>
+    <view class="period">{{item.periodStart}} ~ {{item.periodEnd}}</view>
+  </view>
+  <view class="empty" wx:if="{{settlements.length === 0}}">暂无结算记录</view>
+</view>

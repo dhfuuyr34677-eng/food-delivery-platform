@@ -1,0 +1,15 @@
+<view class="container" wx:if="{{stats}}">
+  <view class="stat-card">
+    <view class="stat-num">{{stats.todayOrders}}</view>
+    <view>今日订单</view>
+  </view>
+  <view class="stat-card">
+    <view class="stat-num">¥{{stats.revenueText}}</view>
+    <view>今日营收</view>
+  </view>
+  <view class="stat-card">
+    <view class="stat-num">{{stats.pendingOrders}}</view>
+    <view>待处理</view>
+  </view>
+</view>
+<custom-tab-bar selected="2" />

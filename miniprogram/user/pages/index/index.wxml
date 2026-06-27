@@ -1,0 +1,11 @@
+<view class="container">
+  <view class="shop-list" wx:if="{{!loading}}">
+    <view class="shop-card" wx:for="{{shops}}" wx:key="id" bindtap="goShop" data-id="{{item.id}}">
+      <view class="shop-name">{{item.name}}</view>
+      <view class="shop-desc">{{item.description || '暂无介绍'}}</view>
+    </view>
+    <view wx:if="{{shops.length === 0}}">附近暂无店铺</view>
+  </view>
+  <view wx:if="{{loading}}">加载中...</view>
+</view>
+<custom-tab-bar selected="0" />

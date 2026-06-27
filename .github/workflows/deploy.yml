@@ -1,0 +1,128 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build:all
+
+  docker:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.REGISTRY_USER }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.server
+          push: true
+          tags: ${{ secrets.REGISTRY_URL }}/fd-server:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push admin image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.admin
+          push: true
+          tags: ${{ secrets.REGISTRY_URL }}/fd-admin:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: docker
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Copy deployment files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: docker-compose.prod.yml,nginx/nginx.conf,nginx/admin-spa.nginx.conf
+          target: /opt/food-delivery/
+          strip_components: 0
+
+      - name: Write .env.production on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cat > /opt/food-delivery/.env.production << 'ENVEOF'
+            DB_USER=${{ vars.DB_USER || 'fduser' }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            DB_NAME=${{ vars.DB_NAME || 'food_delivery' }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            MINIO_ACCESS_KEY=${{ secrets.MINIO_ACCESS_KEY }}
+            MINIO_SECRET_KEY=${{ secrets.MINIO_SECRET_KEY }}
+            MINIO_BUCKET=${{ vars.MINIO_BUCKET || 'food-delivery' }}
+            MINIO_PUBLIC_URL=${{ vars.MINIO_PUBLIC_URL || '/uploads' }}
+            CORS_ORIGIN=${{ vars.CORS_ORIGIN || '*' }}
+            WECHAT_APP_ID=${{ secrets.WECHAT_APP_ID || '' }}
+            WECHAT_APP_SECRET=${{ secrets.WECHAT_APP_SECRET || '' }}
+            WECHAT_PAY_MCH_ID=${{ secrets.WECHAT_PAY_MCH_ID || '' }}
+            WECHAT_PAY_API_KEY_V3=${{ secrets.WECHAT_PAY_API_KEY_V3 || '' }}
+            WECHAT_PAY_SERIAL_NO=${{ secrets.WECHAT_PAY_SERIAL_NO || '' }}
+            WECHAT_PAY_PRIVATE_KEY_PATH=${{ vars.WECHAT_PAY_PRIVATE_KEY_PATH || '/app/certs/apiclient_key.pem' }}
+            WECHAT_PAY_NOTIFY_URL=${{ vars.WECHAT_PAY_NOTIFY_URL || '' }}
+            NGINX_PORT=80
+            REGISTRY_URL=${{ secrets.REGISTRY_URL }}
+            ENVEOF
+
+      - name: Login to container registry on server
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login ghcr.io -u ${{ secrets.REGISTRY_USER }} --password-stdin
+
+      - name: Deploy with Docker Compose
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/food-delivery
+            docker compose -f docker-compose.prod.yml --env-file .env.production pull
+            docker compose -f docker-compose.prod.yml --env-file .env.production up -d --remove-orphans
+            docker image prune -f

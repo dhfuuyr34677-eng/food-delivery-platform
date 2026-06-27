@@ -1,0 +1,5 @@
+.container { padding: 16rpx; }
+.addr-card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 16rpx; display: flex; justify-content: space-between; }
+.addr-text { font-size: 24rpx; color: #999; margin-top: 8rpx; }
+.delete { color: #f44336; font-size: 26rpx; }
+.add-btn { text-align: center; padding: 32rpx; color: #ff6b35; font-size: 30rpx; }

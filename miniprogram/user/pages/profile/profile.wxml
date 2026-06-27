@@ -1,0 +1,22 @@
+<view class="container">
+  <view class="user-header">
+    <view wx:if="{{userInfo}}">
+      <view class="nickname">{{userInfo.nickname || '未设置昵称'}}</view>
+      <view class="phone">{{userInfo.phone || ''}}</view>
+    </view>
+    <view wx:elif="{{token}}">加载中...</view>
+    <view class="login-btn" wx:else bindtap="doLogin">微信一键登录</view>
+  </view>
+
+  <view class="menu-list" wx:if="{{token}}">
+    <view class="menu-item" bindtap="goAddresses">
+      <view>收货地址</view>
+      <view class="arrow">></view>
+    </view>
+    <view class="menu-item" bindtap="goOrders">
+      <view>我的订单</view>
+      <view class="arrow">></view>
+    </view>
+  </view>
+</view>
+<custom-tab-bar selected="2" />

@@ -1,0 +1,9 @@
+.container { padding: 16rpx; }
+.order-card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 16rpx; }
+.order-no { font-size: 26rpx; color: #666; }
+.status { font-size: 32rpx; font-weight: bold; color: #ff6b35; margin: 8rpx 0; }
+.amount { font-size: 30rpx; font-weight: bold; }
+.addr { font-size: 24rpx; color: #999; margin: 8rpx 0; }
+.actions { display: flex; gap: 16rpx; margin-top: 16rpx; }
+.action-btn { padding: 12rpx 32rpx; border-radius: 32rpx; background: #ff6b35; color: #fff; font-size: 26rpx; }
+.empty { text-align: center; padding: 120rpx 0; color: #999; }

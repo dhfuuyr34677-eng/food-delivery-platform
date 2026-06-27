@@ -1,0 +1,12 @@
+<view class="container">
+  <view class="addr-card" wx:for="{{addresses}}" wx:key="id">
+    <view class="addr-main">
+      <view>{{item.contactName}} {{item.phone}}</view>
+      <view class="addr-text">{{item.address}}</view>
+    </view>
+    <view class="addr-actions">
+      <view class="delete" bindtap="deleteAddr" data-id="{{item.id}}">删除</view>
+    </view>
+  </view>
+  <view class="add-btn" bindtap="addAddr">+ 新增地址</view>
+</view>

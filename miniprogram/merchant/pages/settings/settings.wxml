@@ -1,0 +1,21 @@
+<view class="container">
+  <view wx:if="{{isLoggedIn}}">
+    <view class="shop-card" wx:if="{{shop}}">
+      <view class="shop-name">{{shop.name}}</view>
+      <view class="shop-detail">状态: {{shop.statusText}}</view>
+      <view class="shop-detail">{{shop.address}}</view>
+    </view>
+    <view class="menu-list">
+      <view class="menu-item" bindtap="logout">退出登录</view>
+    </view>
+  </view>
+  <view wx:elif="{{showLogin}}">
+    <view class="login-form">
+      <input class="input" placeholder="用户名" value="{{username}}" bindinput="onUsernameInput" />
+      <input class="input" placeholder="密码" type="password" value="{{password}}" bindinput="onPasswordInput" />
+      <view class="login-btn" bindtap="doLogin">登录</view>
+    </view>
+  </view>
+  <view class="login-btn" wx:else bindtap="showLoginForm">商户登录</view>
+</view>
+<custom-tab-bar selected="3" />

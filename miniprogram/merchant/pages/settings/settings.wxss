@@ -1,0 +1,9 @@
+.container { padding: 16rpx; }
+.shop-card { background: linear-gradient(135deg, #ff6b35, #ff8c5a); border-radius: 16rpx; padding: 32rpx; color: #fff; }
+.shop-name { font-size: 36rpx; font-weight: bold; }
+.shop-detail { font-size: 26rpx; margin-top: 8rpx; opacity: 0.9; }
+.menu-list { margin-top: 24rpx; background: #fff; border-radius: 16rpx; }
+.menu-item { text-align: center; padding: 28rpx; color: #f44336; font-size: 30rpx; }
+.login-form { padding: 40rpx 0; }
+.input { background: #fff; border-radius: 12rpx; padding: 24rpx; margin-bottom: 16rpx; font-size: 28rpx; }
+.login-btn { background: #ff6b35; color: #fff; text-align: center; padding: 24rpx; border-radius: 40rpx; font-size: 30rpx; margin-top: 24rpx; }

@@ -1,0 +1,13 @@
+<view class="container">
+  <view class="product-item" wx:for="{{products}}" wx:key="id">
+    <view>
+      <view class="name">{{item.name}}</view>
+      <view class="price">¥{{item.priceText}} {{item.isAvailable ? '' : '(已下架)'}}</view>
+    </view>
+    <view class="toggle" bindtap="toggleProduct" data-id="{{item.id}}" data-available="{{item.isAvailable}}">
+      {{item.statusText}}
+    </view>
+  </view>
+  <view class="add-btn" bindtap="addProduct">+ 新增商品</view>
+</view>
+<custom-tab-bar selected="1" />

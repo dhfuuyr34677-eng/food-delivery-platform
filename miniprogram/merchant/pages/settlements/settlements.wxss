@@ -1,0 +1,10 @@
+.container { padding: 16rpx; }
+.settle-card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 16rpx; }
+.amount { font-size: 40rpx; font-weight: bold; color: #ff6b35; }
+.detail { font-size: 24rpx; color: #666; margin-top: 8rpx; }
+.status { font-size: 26rpx; margin-top: 8rpx; }
+.status.pending { color: #ff9800; }
+.status.settled { color: #2196f3; }
+.status.paid { color: #4caf50; }
+.period { font-size: 22rpx; color: #bbb; margin-top: 4rpx; }
+.empty { text-align: center; padding: 120rpx 0; color: #999; }

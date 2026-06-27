@@ -1,0 +1,5 @@
+.container { padding: 16rpx; }
+.status-bar { text-align: center; padding: 40rpx; font-size: 36rpx; font-weight: bold; color: #ff6b35; }
+.info-card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 16rpx; }
+.label { font-size: 26rpx; color: #999; margin-bottom: 12rpx; }
+.cancel-btn { text-align: center; padding: 24rpx; margin: 32rpx; border: 2rpx solid #f44336; color: #f44336; border-radius: 40rpx; }

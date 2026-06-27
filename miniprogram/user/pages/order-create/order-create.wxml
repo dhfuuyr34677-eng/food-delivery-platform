@@ -1,0 +1,29 @@
+<view class="container">
+  <view class="section">
+    <view class="section-title">配送地址</view>
+    <view class="addr-card" bindtap="selectAddress" wx:if="{{selectedAddress}}">
+      <view>{{selectedAddress.contactName}} {{selectedAddress.phone}}</view>
+      <view class="addr-detail">{{selectedAddress.address}}</view>
+    </view>
+    <view class="addr-empty" bindtap="selectAddress" wx:if="{{!selectedAddress}}">请添加收货地址</view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">商品清单</view>
+    <view class="item" wx:for="{{items}}" wx:key="productId">
+      <view>{{item.name || '商品'}}</view>
+      <view>x{{item.quantity}}</view>
+    </view>
+  </view>
+
+  <view class="section">
+    <view class="section-title">备注</view>
+    <input class="remark-input" placeholder="选填" value="{{remark}}" bindinput="onRemarkInput" />
+  </view>
+
+  <view class="submit-bar">
+    <view class="submit-btn {{submitting ? 'disabled' : ''}}" bindtap="submitOrder">
+      {{submitting ? '提交中...' : '提交订单'}}
+    </view>
+  </view>
+</view>

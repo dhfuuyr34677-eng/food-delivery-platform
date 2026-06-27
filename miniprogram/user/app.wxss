@@ -1,0 +1,11 @@
+page {
+  --primary: #ff6b35;
+  --text: #333;
+  --text-secondary: #999;
+  --bg: #f5f5f5;
+  --white: #fff;
+  font-family: -apple-system, sans-serif;
+  font-size: 28rpx;
+  color: var(--text);
+  background: var(--bg);
+}

@@ -1,0 +1,11 @@
+.container { padding: 16rpx; }
+.order-card { background: #fff; border-radius: 16rpx; padding: 24rpx; margin-bottom: 16rpx; }
+.order-hd { display: flex; justify-content: space-between; font-size: 26rpx; margin-bottom: 16rpx; }
+.status.pending { color: #ff9800; }
+.status.confirmed, .status.preparing { color: #2196f3; }
+.status.delivering { color: #4caf50; }
+.status.completed { color: #999; }
+.status.cancelled { color: #f44336; }
+.order-body { font-size: 28rpx; }
+.time { font-size: 22rpx; color: #bbb; margin-top: 8rpx; }
+.empty { text-align: center; padding: 120rpx 0; color: #999; }
