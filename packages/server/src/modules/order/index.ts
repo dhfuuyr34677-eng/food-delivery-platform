@@ -10,6 +10,10 @@ import {
   addresses,
   shops,
   users,
+  deliveryOrders,
+  splitOrders,
+  splitReceivers,
+  paymentProviders,
 } from '../../db/index.js';
 import { auth } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/role.js';
@@ -21,7 +25,10 @@ import {
   canTransition,
   OrderStatus,
   PaymentStatus,
+  DeliveryOrderStatus,
   USER_CANCELLABLE_STATUSES,
+  SplitStatus,
+  SplitReceiverType,
 } from '@fd/shared';
 import { notifyUser } from '../../services/websocket.js';
 import { getRedis } from '../../services/redis.js';
@@ -32,6 +39,9 @@ import {
   createRefund,
   queryOrder,
 } from '../../services/wechat-pay.js';
+import { getProviderForShop } from '../../services/delivery/index.js';
+import { getGatewayForOrder, getProviderById } from '../../services/payment-gateway/index.js';
+import type { SplitReceiver } from '../../services/payment-gateway/types.js';
 
 export const orderRoutes = new Hono();
 
@@ -106,17 +116,65 @@ orderRoutes.post('/', auth, validate(placeOrderSchema), async (c) => {
   });
 
   const totalAmount = calcOrderAmount(orderItems_data);
-
-  // Create order with address snapshot
   const orderNo = generateOrderNo();
+
+  // If shop uses platform delivery, query delivery fee
+  let deliveryFee = 0;
+  let deliveryOrderId: string | null = null;
+
+  if (shop.deliveryType === 'platform') {
+    const deliveryInfo = await getProviderForShop(shopId);
+    if (deliveryInfo) {
+      // Extract coordinates from address geometry via raw SQL
+      const [coordRow] = await db.execute(
+        `SELECT ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng FROM addresses WHERE id = '${addressId}'`,
+      );
+      const addrLat = (coordRow as Record<string, unknown> | undefined)?.lat as number | undefined;
+      const addrLng = (coordRow as Record<string, unknown> | undefined)?.lng as number | undefined;
+
+      if (addrLat != null && addrLng != null) {
+        try {
+          const feeResult = await deliveryInfo.provider.queryFee({
+            externalShopNo: deliveryInfo.externalShopNo,
+            originId: orderNo,
+            cityCode: '028',
+            cargoPrice: totalAmount / 100,
+            isPrepay: 0,
+            receiverName: address.contactName,
+            receiverAddress: address.address,
+            receiverLat: Number(addrLat),
+            receiverLng: Number(addrLng),
+            receiverPhone: address.phone,
+            cargoWeight: 1,
+            cargoType: 1,
+            callback: `${process.env.APP_BASE_URL ?? 'http://localhost:8787'}/api/delivery/callback/dada`,
+          });
+          deliveryFee = feeResult.deliveryFee;
+        } catch (err) {
+          console.error('[Order] Delivery fee query failed:', err);
+          // Don't block order creation — fall back to deliveryFee=0
+        }
+      }
+    }
+  }
+
+  // Calculate split breakdown (immutable — locked at order creation)
+  const grossAmount = totalAmount + deliveryFee;
+  const commissionRate = Number(shop.commissionRate) / 100; // e.g., 5 -> 0.05
+  const platformCommission = Math.floor(totalAmount * commissionRate); // fen
+  const merchantAmount = grossAmount - platformCommission - deliveryFee;
+
+  // Create order with address snapshot + split fields
   const [order] = await db
     .insert(orders)
     .values({
       orderNo,
       userId,
       shopId,
-      totalAmount,
-      deliveryFee: 0, // self-delivery, no platform fee
+      totalAmount: grossAmount,
+      deliveryFee,
+      platformCommission,
+      merchantAmount,
       remark,
       addressSnapshot: {
         contactName: address.contactName,
@@ -142,6 +200,20 @@ orderRoutes.post('/', auth, validate(placeOrderSchema), async (c) => {
     operatorId: userId,
   });
 
+  // Create delivery order record for platform shops
+  if (shop.deliveryType === 'platform' && shop.deliveryProviderId) {
+    const [dOrder] = await db
+      .insert(deliveryOrders)
+      .values({
+        orderId: order.id,
+        providerId: shop.deliveryProviderId,
+        deliveryFee: deliveryFee > 0 ? deliveryFee : null,
+        status: DeliveryOrderStatus.PENDING,
+      })
+      .returning();
+    deliveryOrderId = dOrder?.id ?? null;
+  }
+
   // Notify merchant via WebSocket
   notifyUser(shopId, {
     type: 'new_order',
@@ -149,28 +221,33 @@ orderRoutes.post('/', auth, validate(placeOrderSchema), async (c) => {
     amount: order.totalAmount,
   });
 
-  // Create WeChat prepay order for mini-program payment
+  // Create payment via gateway (supports direct WeChat Pay + aggregated providers)
   const [user] = await db
     .select({ openid: users.openid })
     .from(users)
     .where(eq(users.id, userId));
 
-  const { prepay_id } = await createJSAPIPrepay({
+  const gateway = await getGatewayForOrder();
+  const paymentResult = await gateway.createPayment({
+    orderId: order.id,
     orderNo: order.orderNo,
-    openid: user!.openid,
-    totalAmount,
+    amount: grossAmount,
     description: `${shop.name}外卖订单`,
+    payerOpenid: user!.openid,
+    notifyUrl: `${process.env.APP_BASE_URL ?? 'http://localhost:8787'}/api/order/payment/callback`,
   });
 
   // Save prepay_id for idempotency
   await db
     .update(orders)
-    .set({ prepayId: prepay_id })
+    .set({ prepayId: paymentResult.prepayId })
     .where(eq(orders.id, order.id));
 
-  const payment = buildJSAPIParams(prepay_id);
-
-  return c.json({ orderNo: order.orderNo, orderId: order.id, payment }, 201);
+  return c.json({
+    orderNo: order.orderNo,
+    orderId: order.id,
+    payment: paymentResult.jsapiParams,
+  }, 201);
 });
 
 // ── GET /api/order ─────────────────────────
@@ -214,7 +291,18 @@ orderRoutes.get('/:id', auth, async (c) => {
     .where(eq(orderStatusLogs.orderId, order.id))
     .orderBy(orderStatusLogs.createdAt);
 
-  return c.json({ ...order, items, statusLogs: logs });
+  // Include delivery order info if present
+  const [deliveryOrder] = await db
+    .select()
+    .from(deliveryOrders)
+    .where(eq(deliveryOrders.orderId, order.id));
+
+  return c.json({
+    ...order,
+    items,
+    statusLogs: logs,
+    delivery: deliveryOrder ?? null,
+  });
 });
 
 // ── POST /api/order/payment/callback ────────
@@ -287,6 +375,14 @@ orderRoutes.post('/payment/callback', async (c) => {
       amount: order.totalAmount,
     });
 
+    // Auto-create split order (fire-and-forget — failures are caught by cron)
+    try {
+      await createSplitForOrder(order.id);
+    } catch (err) {
+      console.error('[Payment] Failed to auto-create split order:', err);
+      // Don't fail the callback — the cron split-sync will retry
+    }
+
     return c.json({ code: 'SUCCESS', message: 'OK' });
   } catch (err) {
     console.error('[Payment] Callback error:', err);
@@ -325,6 +421,32 @@ orderRoutes.post('/:id/cancel', auth, async (c) => {
     return c.json({ code: ErrorCode.INVALID_STATUS_TRANSITION }, 400);
   }
 
+  // Cancel delivery order if exists and not terminal
+  try {
+    const [dOrder] = await db
+      .select()
+      .from(deliveryOrders)
+      .where(eq(deliveryOrders.orderId, id));
+
+    if (dOrder && dOrder.externalOrderId) {
+      const delivery = await getProviderForShop(order.shopId);
+      if (delivery) {
+        try {
+          await delivery.provider.cancelOrder(dOrder.externalOrderId, 'Platform order cancelled');
+        } catch (err) {
+          console.error('[Order] Delivery cancel failed:', err);
+        }
+      }
+      // Mark delivery as cancelled regardless of API success
+      await db
+        .update(deliveryOrders)
+        .set({ status: DeliveryOrderStatus.CANCELLED, updatedAt: new Date() })
+        .where(eq(deliveryOrders.id, dOrder.id));
+    }
+  } catch (err) {
+    console.error('[Order] Delivery order lookup failed:', err);
+  }
+
   // Refund if already paid
   if (order.paymentStatus === 'paid' && order.transactionId) {
     try {
@@ -352,6 +474,13 @@ orderRoutes.post('/:id/cancel', auth, async (c) => {
     .update(orders)
     .set({ status: OrderStatus.CANCELLED, updatedAt: new Date() })
     .where(eq(orders.id, id));
+
+  // Close split order if exists (cancelled orders don't need profit sharing)
+  try {
+    await closeSplitForOrder(id);
+  } catch (err) {
+    console.error('[Order] Failed to close split on cancel:', err);
+  }
 
   // Log
   await db.insert(orderStatusLogs).values({
@@ -427,6 +556,12 @@ orderRoutes.post('/:id/query-payment', auth, async (c) => {
             remark: '支付同步确认',
           });
         }
+        // Auto-create split on payment sync
+        try {
+          await createSplitForOrder(order.id);
+        } catch (err) {
+          console.error('[Order] Failed to auto-create split on payment sync:', err);
+        }
         return c.json({ paymentStatus: 'paid' });
       }
     }
@@ -496,7 +631,103 @@ function merchantOrderAction(
 merchantOrderAction('accept', OrderStatus.CONFIRMED);
 merchantOrderAction('reject', OrderStatus.CANCELLED);
 merchantOrderAction('prepare', OrderStatus.PREPARING);
-merchantOrderAction('deliver', OrderStatus.DELIVERING);
+// merchantOrderAction('deliver', ...) — see custom handler below
+
+// ── POST /api/order/merchant/:id/deliver ─────
+// Handles both self-delivery and platform delivery dispatch
+
+orderRoutes.post(
+  '/merchant/:id/deliver',
+  auth,
+  requireRole('merchant'),
+  async (c) => {
+    const id = c.req.param('id');
+    const { sub, shopId } = c.get('auth');
+
+    const [order] = await db
+      .select()
+      .from(orders)
+      .where(and(eq(orders.id, id), eq(orders.shopId, shopId!)));
+    if (!order) return c.json({ code: ErrorCode.ORDER_NOT_FOUND }, 404);
+
+    if (!canTransition(order.status, OrderStatus.DELIVERING)) {
+      return c.json(
+        { code: ErrorCode.INVALID_STATUS_TRANSITION, message: `无法从 ${order.status} 转换到 delivering` },
+        400,
+      );
+    }
+
+    await db.update(orders)
+      .set({ status: OrderStatus.DELIVERING, updatedAt: new Date() })
+      .where(eq(orders.id, id));
+
+    await db.insert(orderStatusLogs).values({
+      orderId: id, fromStatus: order.status, toStatus: OrderStatus.DELIVERING,
+      operatorRole: 'merchant', operatorId: sub,
+    });
+
+    notifyUser(order.userId, { type: 'order_update', orderNo: order.orderNo, status: OrderStatus.DELIVERING });
+
+    // Platform shop: dispatch to third-party delivery provider
+    const [orderShop] = await db.select({ deliveryType: shops.deliveryType })
+      .from(shops).where(eq(shops.id, order.shopId));
+
+    if (orderShop?.deliveryType === 'platform') {
+      const deliveryInfo = await getProviderForShop(order.shopId);
+      if (deliveryInfo) {
+        let receiverLat = 30.5728, receiverLng = 104.0668;
+        const snap = order.addressSnapshot as Record<string, string> | null;
+        const receiverName = snap?.contactName ?? '';
+        const receiverPhone = snap?.phone ?? '';
+        const receiverAddress = snap?.address ?? '';
+
+        try {
+          const [userAddr] = await db.select().from(addresses)
+            .where(eq(addresses.userId, order.userId)).limit(1);
+          if (userAddr?.location) {
+            const [coord] = await db.execute(
+              `SELECT ST_Y(location::geometry) as lat, ST_X(location::geometry) as lng FROM addresses WHERE id = '${userAddr.id}'`,
+            );
+            const lat = (coord as Record<string, unknown> | undefined)?.lat as number | undefined;
+            const lng = (coord as Record<string, unknown> | undefined)?.lng as number | undefined;
+            if (lat != null && lng != null) { receiverLat = Number(lat); receiverLng = Number(lng); }
+          }
+        } catch { /* use defaults */ }
+
+        try {
+          const result = await deliveryInfo.provider.createOrder({
+            externalShopNo: deliveryInfo.externalShopNo,
+            originId: order.orderNo,
+            cityCode: '028',
+            cargoPrice: (order.totalAmount - (order.deliveryFee ?? 0)) / 100,
+            isPrepay: 0,
+            receiverName: receiverName || '收件人',
+            receiverAddress: receiverAddress || '未知地址',
+            receiverLat, receiverLng,
+            receiverPhone: receiverPhone || '',
+            cargoWeight: 1,
+            cargoType: 1,
+            callback: `${process.env.APP_BASE_URL ?? 'http://localhost:8787'}/api/delivery/callback/dada`,
+          });
+
+          await db.update(deliveryOrders)
+            .set({
+              externalOrderId: result.externalOrderId,
+              deliveryFee: result.deliveryFee,
+              deliveryDistance: result.distance,
+              status: DeliveryOrderStatus.CREATED,
+              updatedAt: new Date(),
+            })
+            .where(eq(deliveryOrders.orderId, order.id));
+        } catch (err) {
+          console.error('[Order] Create delivery failed:', err);
+        }
+      }
+    }
+
+    return c.json({ status: OrderStatus.DELIVERING });
+  },
+);
 
 // ── GET /api/merchant/orders ───────────────
 // (defined in merchant module, but aliased here for convenience)
@@ -512,3 +743,185 @@ orderRoutes.get('/merchant', auth, requireRole('merchant'), async (c) => {
 
   return c.json(list);
 });
+
+// ── Split Helpers ──────────────────────────
+
+/**
+ * Create a split (profit sharing) order for a paid order.
+ * Idempotent — safe to call multiple times.
+ */
+export async function createSplitForOrder(orderId: string): Promise<void> {
+  const [order] = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, orderId));
+
+  if (!order || order.splitStatus !== SplitStatus.UNSPLIT) return;
+  if (order.paymentStatus !== 'paid' || !order.transactionId) return;
+
+  const gateway = await getGatewayForOrder();
+
+  // Build receivers list
+  const receivers: SplitReceiver[] = [];
+
+  // 1. Platform commission
+  if (order.platformCommission > 0) {
+    receivers.push({
+      receiverType: SplitReceiverType.PLATFORM,
+      receiverId: 'platform',
+      receiverName: '平台佣金',
+      amount: order.platformCommission,
+      description: `订单#${order.orderNo} 平台抽成`,
+    });
+  }
+
+  // 2. Merchant share (requires settlement account on shop)
+  const [shop] = await db
+    .select()
+    .from(shops)
+    .where(eq(shops.id, order.shopId));
+
+  if (order.merchantAmount > 0) {
+    const settlementAccount = shop?.settlementAccount as Record<string, string> | null;
+    const receiverId = settlementAccount?.accountNo ?? order.shopId;
+    const receiverName = settlementAccount?.accountName ?? shop?.name ?? '商户';
+    receivers.push({
+      receiverType: SplitReceiverType.MERCHANT,
+      receiverId,
+      receiverName,
+      amount: order.merchantAmount,
+      description: `订单#${order.orderNo} 商户收入`,
+    });
+  }
+
+  // 3. Delivery fee (only for platform delivery orders)
+  if (order.deliveryFee && order.deliveryFee > 0) {
+    receivers.push({
+      receiverType: SplitReceiverType.DELIVERY,
+      receiverId: 'delivery',
+      receiverName: '配送费',
+      amount: order.deliveryFee,
+      description: `订单#${order.orderNo} 配送费`,
+    });
+  }
+
+  if (receivers.length === 0) {
+    await db
+      .update(orders)
+      .set({ splitStatus: SplitStatus.CLOSED })
+      .where(eq(orders.id, orderId));
+    return;
+  }
+
+  // Get the default payment provider ID
+  const [defaultProvider] = await db
+    .select()
+    .from(paymentProviders)
+    .where(eq(paymentProviders.isDefault, true))
+    .limit(1);
+
+  // Create split via gateway
+  const splitResult = await gateway.createSplit({
+    orderId: order.id,
+    transactionId: order.transactionId,
+    totalAmount: order.totalAmount,
+    receivers,
+    idempotencyKey: `split_${order.id}`,
+  });
+
+  // Insert split_orders row
+  const [splitOrder] = await db
+    .insert(splitOrders)
+    .values({
+      orderId: order.id,
+      providerId: defaultProvider?.id ?? '00000000-0000-0000-0000-000000000000',
+      gatewaySplitNo: splitResult.gatewaySplitNo,
+      gatewayTransactionId: order.transactionId,
+      totalAmount: order.totalAmount,
+      unfinishAmount: order.totalAmount,
+      status: SplitStatus.PROCESSING,
+    })
+    .returning();
+
+  // Insert split_receivers rows
+  for (const result of splitResult.receiverResults) {
+    const receiverDef = receivers.find((r) => r.receiverType === result.receiverType);
+    if (receiverDef) {
+      await db.insert(splitReceivers).values({
+        splitOrderId: splitOrder.id,
+        receiverType: receiverDef.receiverType,
+        receiverId: receiverDef.receiverId,
+        receiverName: receiverDef.receiverName,
+        amount: receiverDef.amount,
+        description: receiverDef.description,
+        gatewaySplitNo: result.gatewaySplitNo,
+        result: result.result,
+      });
+    }
+  }
+
+  // Update order.splitStatus
+  await db
+    .update(orders)
+    .set({ splitStatus: SplitStatus.PROCESSING })
+    .where(eq(orders.id, orderId));
+
+  console.log(`[Split] Created split order ${splitOrder.id} for order ${order.orderNo}`);
+}
+
+/**
+ * Finish a split order — releases frozen funds to receivers.
+ * Called when the order transitions to 'completed'.
+ */
+export async function finishSplitForOrder(orderId: string): Promise<void> {
+  const [splitOrder] = await db
+    .select()
+    .from(splitOrders)
+    .where(eq(splitOrders.orderId, orderId));
+
+  if (!splitOrder || splitOrder.status !== SplitStatus.PROCESSING) return;
+  if (!splitOrder.gatewaySplitNo || !splitOrder.gatewayTransactionId) return;
+
+  try {
+    const gateway = await getProviderById(splitOrder.providerId);
+    await gateway.finishSplit({
+      gatewaySplitNo: splitOrder.gatewaySplitNo,
+      transactionId: splitOrder.gatewayTransactionId,
+      totalAmount: splitOrder.totalAmount,
+      idempotencyKey: `finish_${splitOrder.id}`,
+    });
+
+    await db
+      .update(splitOrders)
+      .set({
+        status: SplitStatus.FINISHED,
+        finishedAt: new Date(),
+        unfinishAmount: 0,
+      })
+      .where(eq(splitOrders.id, splitOrder.id));
+
+    await db
+      .update(orders)
+      .set({ splitStatus: SplitStatus.FINISHED })
+      .where(eq(orders.id, orderId));
+
+    console.log(`[Split] Finished split for order ${orderId}`);
+  } catch (err) {
+    console.error(`[Split] Failed to finish split for order ${orderId}:`, err);
+  }
+}
+
+/**
+ * Close split — marks as not needed (used when order is cancelled before split creation).
+ */
+export async function closeSplitForOrder(orderId: string): Promise<void> {
+  await db
+    .update(orders)
+    .set({ splitStatus: SplitStatus.CLOSED })
+    .where(eq(orders.id, orderId));
+
+  await db
+    .update(splitOrders)
+    .set({ status: SplitStatus.CLOSED })
+    .where(eq(splitOrders.orderId, orderId));
+}

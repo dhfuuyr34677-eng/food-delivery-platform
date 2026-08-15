@@ -9,6 +9,8 @@ import {
   shops,
   orders,
   settlements,
+  deliveryProviders,
+  deliveryOrders,
 } from '../../db/index.js';
 import { auth } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/role.js';
@@ -226,4 +228,98 @@ adminRoutes.post('/settlements/:id/pay', auth, requireRole('admin'), async (c) =
     .returning();
   if (!s) return c.json({ code: ErrorCode.SETTLEMENT_NOT_FOUND }, 404);
   return c.json(s);
+});
+
+// ── Delivery Providers Management ────────────
+
+adminRoutes.get('/delivery/providers', auth, requireRole('admin'), async (c) => {
+  const list = await db.select().from(deliveryProviders).orderBy(deliveryProviders.createdAt);
+  return c.json(list);
+});
+
+const providerSchema = z.object({
+  name: z.string().min(1).max(32),
+  displayName: z.string().min(1).max(64),
+  config: z.record(z.unknown()),
+});
+
+adminRoutes.post('/delivery/providers', auth, requireRole('admin'), validate(providerSchema), async (c) => {
+  const { name, displayName, config } = c.get('validated');
+  const [provider] = await db
+    .insert(deliveryProviders)
+    .values({ name, displayName, config, isActive: true })
+    .returning();
+  return c.json(provider, 201);
+});
+
+adminRoutes.put('/delivery/providers/:id', auth, requireRole('admin'), async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+  const { displayName, config, isActive } = body as {
+    displayName?: string;
+    config?: Record<string, unknown>;
+    isActive?: boolean;
+  };
+
+  const updates: Record<string, unknown> = {};
+  if (displayName !== undefined) updates.displayName = displayName;
+  if (config !== undefined) updates.config = config;
+  if (isActive !== undefined) updates.isActive = isActive;
+
+  const [provider] = await db
+    .update(deliveryProviders)
+    .set(updates)
+    .where(eq(deliveryProviders.id, id))
+    .returning();
+  if (!provider) {
+    return c.json({ code: ErrorCode.DELIVERY_PROVIDER_NOT_FOUND, message: 'Provider not found' }, 404);
+  }
+  return c.json(provider);
+});
+
+// ── Shop Delivery Configuration ──────────────
+
+adminRoutes.put('/shops/:id/delivery-type', auth, requireRole('admin'), async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+  const { deliveryType } = body as { deliveryType: string };
+
+  if (!['self', 'platform'].includes(deliveryType)) {
+    return c.json({ code: ErrorCode.VALIDATION_ERROR, message: 'deliveryType must be self or platform' }, 400);
+  }
+
+  const [shop] = await db
+    .update(shops)
+    .set({ deliveryType, updatedAt: new Date() })
+    .where(eq(shops.id, id))
+    .returning();
+  if (!shop) return c.json({ code: ErrorCode.SHOP_NOT_FOUND }, 404);
+  return c.json(shop);
+});
+
+adminRoutes.put('/shops/:id/bind-delivery', auth, requireRole('admin'), async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json();
+  const { providerId, externalShopNo } = body as {
+    providerId: string;
+    externalShopNo: string;
+  };
+
+  const [shop] = await db
+    .update(shops)
+    .set({ deliveryProviderId: providerId, externalShopNo, updatedAt: new Date() })
+    .where(eq(shops.id, id))
+    .returning();
+  if (!shop) return c.json({ code: ErrorCode.SHOP_NOT_FOUND }, 404);
+  return c.json(shop);
+});
+
+// ── Delivery Orders (admin view) ─────────────
+
+adminRoutes.get('/delivery/orders', auth, requireRole('admin'), async (c) => {
+  const list = await db
+    .select()
+    .from(deliveryOrders)
+    .orderBy(desc(deliveryOrders.createdAt));
+  return c.json(list);
 });

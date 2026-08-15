@@ -50,6 +50,22 @@ export const paymentStatusEnum = pgEnum('payment_status', [
   'refunded',
 ]);
 
+export const deliveryTypeEnum = pgEnum('delivery_type', [
+  'self',
+  'platform',
+]);
+
+export const deliveryOrderStatusEnum = pgEnum('delivery_order_status', [
+  'pending',
+  'created',
+  'assigned',
+  'picked_up',
+  'delivering',
+  'delivered',
+  'cancelled',
+  'abnormal',
+]);
+
 // ── Users ────────────────────────────────────────────
 
 export const users = pgTable('users', {
@@ -90,6 +106,10 @@ export const shops = pgTable('shops', {
   status: shopStatusEnum('status').default('pending').notNull(),
   avgRating: numeric('avg_rating', { precision: 2, scale: 1 }).default('0'),
   commissionRate: numeric('commission_rate', { precision: 3, scale: 2 }).default('0.05'),
+  deliveryType: deliveryTypeEnum('delivery_type').default('self').notNull(),
+  deliveryProviderId: uuid('delivery_provider_id'),
+  externalShopNo: varchar('external_shop_no', { length: 64 }),
+  settlementAccount: jsonb('settlement_account'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -157,6 +177,9 @@ export const orders = pgTable('orders', {
   transactionId: varchar('transaction_id', { length: 64 }),
   paidAt: timestamp('paid_at'),
   prepayId: varchar('prepay_id', { length: 64 }),
+  splitStatus: text('split_status').default('unsplit').notNull(),
+  platformCommission: integer('platform_commission').default(0).notNull(),
+  merchantAmount: integer('merchant_amount').default(0).notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -230,6 +253,113 @@ export const uploads = pgTable('uploads', {
   mimeType: varchar('mime_type', { length: 64 }),
   size: integer('size'), // bytes
   createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ── Delivery Providers ────────────────────────────────
+
+export const deliveryProviders = pgTable('delivery_providers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 32 }).notNull().unique(),
+  displayName: varchar('display_name', { length: 64 }).notNull(),
+  config: jsonb('config').notNull(),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ── Delivery Orders ────────────────────────────────────
+
+export const deliveryOrders = pgTable('delivery_orders', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orderId: uuid('order_id')
+    .notNull()
+    .unique()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+  providerId: uuid('provider_id')
+    .notNull()
+    .references(() => deliveryProviders.id),
+  externalOrderId: varchar('external_order_id', { length: 128 }),
+  deliveryFee: integer('delivery_fee'), // fen
+  deliveryDistance: integer('delivery_distance'), // meters
+  status: deliveryOrderStatusEnum('status').default('pending').notNull(),
+  statusDetail: jsonb('status_detail'),
+  riderName: varchar('rider_name', { length: 32 }),
+  riderPhone: varchar('rider_phone', { length: 20 }),
+  riderLat: numeric('rider_lat', { precision: 10, scale: 7 }),
+  riderLng: numeric('rider_lng', { precision: 10, scale: 7 }),
+  estimatedDeliveryTime: timestamp('estimated_delivery_time'),
+  actualDeliveryTime: timestamp('actual_delivery_time'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ── Delivery Callbacks ─────────────────────────────────
+
+export const deliveryCallbacks = pgTable('delivery_callbacks', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  providerId: uuid('provider_id')
+    .notNull()
+    .references(() => deliveryProviders.id),
+  orderId: uuid('order_id').references(() => orders.id, { onDelete: 'set null' }),
+  rawBody: text('raw_body').notNull(),
+  parsedStatus: varchar('parsed_status', { length: 32 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// ── Payment Providers ─────────────────────────────────
+
+export const paymentProviders = pgTable('payment_providers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  name: varchar('name', { length: 32 }).notNull().unique(),
+  displayName: varchar('display_name', { length: 64 }).notNull(),
+  providerType: varchar('provider_type', { length: 32 }).notNull(),
+  config: jsonb('config').notNull().default({}),
+  isDefault: boolean('is_default').default(false).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// ── Split Orders ──────────────────────────────────────
+
+export const splitOrders = pgTable('split_orders', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  orderId: uuid('order_id')
+    .notNull()
+    .unique()
+    .references(() => orders.id, { onDelete: 'restrict' }),
+  providerId: uuid('provider_id')
+    .notNull()
+    .references(() => paymentProviders.id),
+  gatewaySplitNo: varchar('gateway_split_no', { length: 128 }),
+  gatewayTransactionId: varchar('gateway_transaction_id', { length: 64 }),
+  totalAmount: integer('total_amount').notNull(),
+  unfinishAmount: integer('unfinish_amount').notNull().default(0),
+  status: text('status').default('unsplit').notNull(),
+  errorMessage: text('error_message'),
+  retryCount: integer('retry_count').default(0).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  finishedAt: timestamp('finished_at'),
+});
+
+// ── Split Receivers ───────────────────────────────────
+
+export const splitReceivers = pgTable('split_receivers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  splitOrderId: uuid('split_order_id')
+    .notNull()
+    .references(() => splitOrders.id, { onDelete: 'cascade' }),
+  receiverType: varchar('receiver_type', { length: 16 }).notNull(),
+  receiverId: varchar('receiver_id', { length: 128 }).notNull(),
+  receiverName: varchar('receiver_name', { length: 64 }).notNull(),
+  amount: integer('amount').notNull(),
+  description: varchar('description', { length: 256 }).notNull(),
+  gatewaySplitNo: varchar('gateway_split_no', { length: 128 }),
+  result: varchar('result', { length: 16 }),
+  failReason: varchar('fail_reason', { length: 256 }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+  finishedAt: timestamp('finished_at'),
 });
 
 // ── Indexes ──────────────────────────────────────────

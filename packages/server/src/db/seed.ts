@@ -1,5 +1,5 @@
 import { db } from './index.js';
-import { admins, shops, categories, products } from './schema.js';
+import { admins, shops, categories, products, deliveryProviders } from './schema.js';
 import bcrypt from 'bcryptjs';
 
 async function seed() {
@@ -65,6 +65,20 @@ async function seed() {
 
     console.log(`[Seed] Shop "${s.name}" created with 3 products`);
   }
+
+  // Create default Dada delivery provider (mock mode — real credentials needed for production)
+  await db.insert(deliveryProviders).values({
+    name: 'dada',
+    displayName: '达达秒送',
+    config: {
+      appKey: 'mock_app_key',
+      appSecret: 'mock_app_secret',
+      sourceId: 'mock_source_id',
+      baseUrl: 'http://newopen.qa.imdada.cn', // Dada test environment
+    },
+    isActive: true,
+  }).onConflictDoNothing();
+  console.log('[Seed] Dada delivery provider created (mock mode)');
 
   console.log('[Seed] Done.');
   process.exit(0);

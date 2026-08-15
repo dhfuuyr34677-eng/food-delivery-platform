@@ -71,3 +71,131 @@ export const PaymentStatus = {
 
 export type PaymentStatusType =
   (typeof PaymentStatus)[keyof typeof PaymentStatus];
+
+// Delivery type
+export const DeliveryType = {
+  SELF: 'self',
+  PLATFORM: 'platform',
+} as const;
+
+export type DeliveryTypeType =
+  (typeof DeliveryType)[keyof typeof DeliveryType];
+
+// Delivery order status
+export const DeliveryOrderStatus = {
+  PENDING: 'pending',
+  CREATED: 'created',
+  ASSIGNED: 'assigned',
+  PICKED_UP: 'picked_up',
+  DELIVERING: 'delivering',
+  DELIVERED: 'delivered',
+  CANCELLED: 'cancelled',
+  ABNORMAL: 'abnormal',
+} as const;
+
+export type DeliveryOrderStatusType =
+  (typeof DeliveryOrderStatus)[keyof typeof DeliveryOrderStatus];
+
+// Delivery status transitions
+export const DELIVERY_TRANSITIONS: Record<
+  DeliveryOrderStatusType,
+  DeliveryOrderStatusType[]
+> = {
+  [DeliveryOrderStatus.PENDING]: [
+    DeliveryOrderStatus.CREATED,
+    DeliveryOrderStatus.CANCELLED,
+  ],
+  [DeliveryOrderStatus.CREATED]: [
+    DeliveryOrderStatus.ASSIGNED,
+    DeliveryOrderStatus.CANCELLED,
+  ],
+  [DeliveryOrderStatus.ASSIGNED]: [
+    DeliveryOrderStatus.PICKED_UP,
+    DeliveryOrderStatus.CANCELLED,
+  ],
+  [DeliveryOrderStatus.PICKED_UP]: [DeliveryOrderStatus.DELIVERING],
+  [DeliveryOrderStatus.DELIVERING]: [
+    DeliveryOrderStatus.DELIVERED,
+    DeliveryOrderStatus.ABNORMAL,
+  ],
+  [DeliveryOrderStatus.DELIVERED]: [],
+  [DeliveryOrderStatus.CANCELLED]: [],
+  [DeliveryOrderStatus.ABNORMAL]: [],
+};
+
+export function canTransitionDelivery(
+  from: DeliveryOrderStatusType,
+  to: DeliveryOrderStatusType,
+): boolean {
+  return DELIVERY_TRANSITIONS[from]?.includes(to) ?? false;
+}
+
+// Delivery status is terminal (no further changes)
+export function isDeliveryTerminal(status: DeliveryOrderStatusType): boolean {
+  return (
+    status === DeliveryOrderStatus.DELIVERED ||
+    status === DeliveryOrderStatus.CANCELLED ||
+    status === DeliveryOrderStatus.ABNORMAL
+  );
+}
+
+// ── Payment Provider Type ─────────────────────────
+
+export const PaymentProviderType = {
+  WECHAT_PAY_DIRECT: 'wechat_pay_direct',
+  WECHAT_PAY_AGGREGATED: 'wechat_pay_aggregated',
+  MOCK: 'mock',
+} as const;
+
+export type PaymentProviderTypeValue =
+  (typeof PaymentProviderType)[keyof typeof PaymentProviderType];
+
+// ── Split (Profit Sharing) Status ──────────────────
+
+export const SplitStatus = {
+  UNSPLIT: 'unsplit',
+  PROCESSING: 'processing',
+  FINISHED: 'finished',
+  RETURNING: 'returning',
+  RETURNED: 'returned',
+  FAILED: 'failed',
+  CLOSED: 'closed',
+} as const;
+
+export type SplitStatusType =
+  (typeof SplitStatus)[keyof typeof SplitStatus];
+
+// ── Split Receiver Type ────────────────────────────
+
+export const SplitReceiverType = {
+  MERCHANT: 'merchant',
+  PLATFORM: 'platform',
+  DELIVERY: 'delivery',
+} as const;
+
+export type SplitReceiverTypeValue =
+  (typeof SplitReceiverType)[keyof typeof SplitReceiverType];
+
+// Map Dada callback status codes to our delivery status
+// Dada: 1=待接单, 2=待取货, 3=配送中, 4=已送达, 5=已取消, 9/10=异常
+export function mapDadaStatusToDeliveryStatus(
+  dadaStatus: number,
+): DeliveryOrderStatusType {
+  switch (dadaStatus) {
+    case 1:
+      return DeliveryOrderStatus.CREATED;
+    case 2:
+      return DeliveryOrderStatus.ASSIGNED;
+    case 3:
+      return DeliveryOrderStatus.DELIVERING;
+    case 4:
+      return DeliveryOrderStatus.DELIVERED;
+    case 5:
+      return DeliveryOrderStatus.CANCELLED;
+    case 9:
+    case 10:
+      return DeliveryOrderStatus.ABNORMAL;
+    default:
+      return DeliveryOrderStatus.PENDING;
+  }
+}

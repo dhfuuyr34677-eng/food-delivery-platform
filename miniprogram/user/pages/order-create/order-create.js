@@ -42,7 +42,25 @@ Page({
         items: this.data.items,
         remark: this.data.remark,
       });
-      wx.redirectTo({ url: '/pages/order-detail/order-detail?id=' + res.orderId });
+
+      const payment = res.payment;
+      if (payment && payment.paySign !== 'MOCK_PAY_SIGN') {
+        wx.requestPayment({
+          timeStamp: payment.timeStamp,
+          nonceStr: payment.nonceStr,
+          package: payment.package,
+          signType: payment.signType,
+          paySign: payment.paySign,
+          success: function () {
+            wx.redirectTo({ url: '/pages/order-detail/order-detail?id=' + res.orderId });
+          },
+          fail: function () {
+            wx.redirectTo({ url: '/pages/order-detail/order-detail?id=' + res.orderId });
+          },
+        });
+      } else {
+        wx.redirectTo({ url: '/pages/order-detail/order-detail?id=' + res.orderId });
+      }
     } catch {
       wx.showToast({ title: '下单失败', icon: 'none' });
     } finally {

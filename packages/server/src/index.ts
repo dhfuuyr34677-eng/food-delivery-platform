@@ -14,6 +14,11 @@ import { orderRoutes } from './modules/order/index.js';
 import { merchantRoutes } from './modules/merchant/index.js';
 import { adminRoutes } from './modules/admin/index.js';
 import { uploadRoutes } from './modules/upload/index.js';
+import { deliveryRoutes } from './modules/delivery/index.js';
+import { paymentRoutes } from './modules/payment/index.js';
+import { settlementRoutes } from './modules/settlement/index.js';
+import { startDeliverySync } from './cron/delivery-sync.js';
+import { startSplitSync } from './services/payment-gateway/split-sync.js';
 
 const app = new Hono();
 
@@ -34,6 +39,9 @@ app.route('/api/order', orderRoutes);
 app.route('/api/merchant', merchantRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/upload', uploadRoutes);
+app.route('/api/delivery', deliveryRoutes);
+app.route('/api/payment', paymentRoutes);
+app.route('/api/settlement', settlementRoutes);
 
 const port = Number(process.env.PORT) || 3000;
 
@@ -43,5 +51,11 @@ const server = serve({ fetch: app.fetch, port }, (info) => {
 
 // WebSocket
 setupWebSocket(server);
+
+// Delivery sync cron (poll every 2 minutes)
+startDeliverySync(120_000);
+
+// Split sync cron (poll every 5 minutes)
+startSplitSync(300_000);
 
 export type { JwtPayload } from './utils/jwt.js';
